@@ -9,6 +9,15 @@ public class Slingshot : MonoBehaviour
     public GameObject projectilePrefab;
     public float velocityMult = 10f;
     public GameObject projLinePrefab;
+    public LineRenderer rubberBand;
+    public Transform bandAnchorLeft;
+    public Transform bandAnchorRight;
+
+    [Header("Sound")]
+    public AudioSource audioSource;
+    public AudioClip launchSound;
+    public AudioSource stretchAudioSource;
+    public AudioClip stretchSound;
 
     // fields set dynamically
     [Header("Dynamic")]
@@ -22,6 +31,9 @@ public class Slingshot : MonoBehaviour
         launchPoint = launchPointTrans.gameObject;
         launchPoint.SetActive(false);
         launchPos = launchPointTrans.position;
+        
+        rubberBand.positionCount = 3;
+        rubberBand.enabled = false;
     }
 
     void OnMouseEnter() {
@@ -33,6 +45,13 @@ public class Slingshot : MonoBehaviour
     }
 
     void OnMouseDown() {
+        if (aimingMode || 
+            MissionDemolition.GAME_OVER || 
+            MissionDemolition.SHOTS_LEFT() <= 0 ||
+            Goal.goalMet){
+            return;
+        }
+
         // The player has pressed the mouse button while over Slingshot
         aimingMode = true;
         // Instantiate a Projectile
@@ -41,6 +60,25 @@ public class Slingshot : MonoBehaviour
         projectile.transform.position = launchPos;
         // Set it to isKinematic for now
         projectile.GetComponent<Rigidbody>().isKinematic = true;
+        // Enable the rubber band line renderer
+        rubberBand.enabled = true;
+        //start the stretch sound
+        StartStretchSound();
+    }
+
+    void StartStretchSound() {
+        if(stretchAudioSource == null || stretchSound == null) {
+            return;
+        }
+
+        stretchAudioSource.clip = stretchSound;
+        stretchAudioSource.loop = true;
+        stretchAudioSource.Play();
+    }
+    void StopStretchSound() {
+        if(stretchAudioSource != null && stretchAudioSource.isPlaying) {
+            stretchAudioSource.Stop();
+        }
     }
 
     void Update() {
@@ -64,9 +102,35 @@ public class Slingshot : MonoBehaviour
         Vector3 projPos = launchPos + mouseDelta;
         projectile.transform.position = projPos;
 
+        // Update the rubber band positions to match the projectile and anchors
+        rubberBand.SetPosition(0, bandAnchorLeft.position);
+        rubberBand.SetPosition(1, projectile.transform.position);
+        rubberBand.SetPosition(2, bandAnchorRight.position);
+
+        //check if goal was hit
+        if(Goal.goalMet) {
+            aimingMode = false;
+            StopStretchSound();
+
+            if(rubberBand != null)
+                rubberBand.enabled = false;
+
+            return;
+        }
+
         if(Input.GetMouseButtonUp(0)) {
             // The monuse has been released
             aimingMode = false;
+            rubberBand.enabled = false;
+
+            //Stop the stretch sound
+            StopStretchSound();
+
+            // Play the launch sound
+            if(audioSource != null && launchSound != null) {
+                audioSource.PlayOneShot(launchSound);
+            }   
+
             Rigidbody projRB = projectile.GetComponent<Rigidbody>();
             projRB.isKinematic = false;
             projRB.collisionDetectionMode = CollisionDetectionMode.Continuous;

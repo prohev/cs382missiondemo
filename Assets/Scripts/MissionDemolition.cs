@@ -1,10 +1,9 @@
-using System.Collections;
-using System.Collections.Generic;
+
 using UnityEngine;
-using UnityEngine.UI;
 using TMPro;
 
-public enum GameMode {
+public enum GameMode
+{
     idle,
     playing,
     levelEnd
@@ -12,96 +11,196 @@ public enum GameMode {
 
 public class MissionDemolition : MonoBehaviour
 {
-    static private MissionDemolition S; // a private Singleton
+    static private MissionDemolition S;
+
+    public static bool GAME_OVER { get; private set; }
+
+    private const int MAX_SHOTS = 10;
+    public static int SHOTS_LEFT() { return S != null ? S.shotsLeft : 0; }
 
     [Header("Inscribed")]
-    public TextMeshProUGUI uitLevel; // The UIText_Level Text
-    public TextMeshProUGUI uitShots; // The UIText_Shots Text
-    public Vector3 castlePos; // The place to put castles
-    public GameObject[] castles; // An array of the castles
+    public TextMeshProUGUI uitLevel;
+    public TextMeshProUGUI uitShots;
+    public Vector3 castlePos;
+    public GameObject[] castles;
+
+    [Header("Game Over UI")]
+    public GameObject gameOverPanel;
+    public TextMeshProUGUI gameOverText;
 
     [Header("Dynamic")]
-    public int level; // The current level
-    public int levelMax; // The number of levels
-    public int shotsTaken;
-    public GameObject castle; // The current castle
+    public int level;
+    public int levelMax;
+    public int shotsLeft;
+    public GameObject castle;
     public GameMode mode = GameMode.idle;
-    public string showing = "Show Slingshot"; // FollowCam mode
+    public string showing = "Show Slingshot";
 
-    // Start is called before the first frame update
     void Start()
     {
-        S = this; // Define the Singleton
+        S = this;
 
         level = 0;
-        shotsTaken = 0;
+        shotsLeft = MAX_SHOTS;
         levelMax = castles.Length;
+        GAME_OVER = false;
+
+        if (gameOverPanel != null)
+            gameOverPanel.SetActive(false);
+
         StartLevel();
     }
 
-    void StartLevel() {
-        // Get rid of the old castle if one exists
-        if(castle != null) {
-            Destroy(castle);
-        }
+    void StartLevel()
+    {
+        if (GAME_OVER)
+            return;
 
-        // Destroy old projectiles if they exist
+        if (castle != null)
+            Destroy(castle);
+
         Projectile.DESTROY_PROJECTILES();
 
-        // Instantiate the new castle
         castle = Instantiate<GameObject>(castles[level]);
         castle.transform.position = castlePos;
 
-        // Reset the goal
         Goal.goalMet = false;
 
         UpdateGUI();
-
         mode = GameMode.playing;
 
-        // Zoom out to show both
         FollowCam.SWITCH_VIEW(FollowCam.eView.both);
     }
 
-    void UpdateGUI() {
-        // Show the data in the GUITexts
-        uitLevel.text = "Level: " + (level + 1) + " of " + levelMax;
-        uitShots.text = "Shots Taken: " + shotsTaken;
+    void UpdateGUI()
+    {
+        if (uitLevel != null)
+            uitLevel.text = "Level: " + (level + 1) + " of " + levelMax;
+
+        if (uitShots != null)
+            uitShots.text = "Shots Left: " + shotsLeft;
     }
 
-    // Update is called once per frame
     void Update()
     {
         UpdateGUI();
 
-        // Check for level end
-        if((mode == GameMode.playing) && Goal.goalMet) {
-            // Change mode to stop checking for level end
+        if (GAME_OVER)
+            return;
+
+        // Check whether the current castle was cleared first.
+        if (mode == GameMode.playing && Goal.goalMet)
+        {
             mode = GameMode.levelEnd;
-            // Zoom out to show both
+
             FollowCam.SWITCH_VIEW(FollowCam.eView.both);
 
-            // Start the next level in 2 seconds
-            Invoke("NextLevel", 2f);  
+            // Allow the final shot to finish before advancing.
+            CancelInvoke(nameof(CheckOutOfShots));
+            Invoke(nameof(NextLevel), 2f);
+            return;
+        }
+
+        // Give the last projectile time to reach its target.
+        if (mode == GameMode.playing && shotsLeft <= 0)
+        {
+            if (!IsInvoking(nameof(CheckOutOfShots)))
+                Invoke(nameof(CheckOutOfShots), 3f);
         }
     }
 
-    void NextLevel() {
-        level++;
-        if(level == levelMax) {
-            level = 0;
-            shotsTaken = 0;
+    void CheckOutOfShots()
+    {
+        if (GAME_OVER || mode != GameMode.playing)
+            return;
+
+        if (Goal.goalMet)
+        {
+            NextLevel();
+            return;
         }
+
+        EndGame(
+            "GAME OVER!\n" +
+            "Out of shots!\n" +
+            "You ended on Level " + (level + 1) +
+            " of " + levelMax + "."
+        );
+    }
+
+    void NextLevel()
+    {
+        if (GAME_OVER)
+            return;
+
+        CancelInvoke(nameof(CheckOutOfShots));
+
+        level++;
+
+        // All castles have been completed.
+        if (level > levelMax)
+        {
+            EndGame(
+                "YOU WIN!\n" +
+                "You conquered all " + levelMax + " levels!"
+            );
+            return;
+        }
+
+        // No shots remain to attempt another castle.
+        if (shotsLeft <= 0)
+        {
+            EndGame(
+                "GAME OVER!\n" +
+                "You ran out of shots!\n" +
+                "You ended on Level " + level +
+                " of " + levelMax + "."
+            );
+            return;
+        }
+
         StartLevel();
     }
 
-    // Static method that allows code anywhere to increment shotsTaken
-    static public void SHOT_FIRED() {
-        S.shotsTaken++;
+    void EndGame(string message)
+    {
+        GAME_OVER = true;
+        mode = GameMode.levelEnd;
+
+        CancelInvoke();
+
+        if (gameOverText != null)
+            gameOverText.text = message;
+
+        if (gameOverPanel != null)
+            gameOverPanel.SetActive(true);
     }
 
-    // Static method that allows code anywhere to get a reference to S.castle
-    static public GameObject GET_CASTLE() {
+    public void PlayAgain()
+    {
+        CancelInvoke();
+
+        GAME_OVER = false;
+        level = 0;
+        shotsLeft = MAX_SHOTS;
+
+        if (gameOverPanel != null)
+            gameOverPanel.SetActive(false);
+
+        StartLevel();
+    }
+
+    static public void SHOT_FIRED()
+    {
+        if (S == null || GAME_OVER || S.shotsLeft <= 0)
+            return;
+
+        S.shotsLeft--;
+        S.UpdateGUI();
+    }
+
+    static public GameObject GET_CASTLE()
+    {
         return S.castle;
     }
 }
